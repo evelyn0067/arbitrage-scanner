@@ -7,12 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=5">
-  <script>
-    // 首屏前应用已保存主题，避免闪烁
-    try { var _t = localStorage.getItem('arbi_theme');
-      if (_t && _t !== 'light') document.documentElement.setAttribute('data-theme', _t); } catch (e) {}
-  </script>
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 
@@ -20,7 +15,6 @@
 <nav class="topnav">
   <div class="nav-left">
     <span class="logo">
-      <span class="logo-icon">⚡</span>
       ArbiScan
     </span>
     <span class="nav-badge">LIVE</span>
@@ -34,20 +28,6 @@
 
   <div class="nav-right">
     <span class="update-time" id="updateTime">--</span>
-    <div class="theme-switch" id="themeSwitch">
-      <button class="btn-icon" id="themeBtn" title="切换主题">🎨</button>
-      <div class="theme-menu" id="themeMenu" hidden>
-        <div class="theme-menu-title">简约</div>
-        <button class="theme-opt" data-theme="light"><span class="theme-sw sw-light"></span>极简白</button>
-        <button class="theme-opt" data-theme="paper"><span class="theme-sw sw-paper"></span>暖纸</button>
-        <button class="theme-opt" data-theme="midnight"><span class="theme-sw sw-midnight"></span>午夜蓝</button>
-        <div class="theme-menu-title" style="margin-top:4px">有趣</div>
-        <button class="theme-opt" data-theme="pop"><span class="theme-sw sw-pop"></span>波普涂鸦</button>
-        <button class="theme-opt" data-theme="candy"><span class="theme-sw sw-candy"></span>糖果马卡龙</button>
-        <button class="theme-opt" data-theme="synthwave"><span class="theme-sw sw-synthwave"></span>蒸汽波</button>
-        <button class="theme-opt" data-theme="arcade"><span class="theme-sw sw-arcade"></span>像素机厅</button>
-      </div>
-    </div>
     <button class="btn-icon" id="refreshBtn" title="刷新数据">↻</button>
     <button class="btn-settings" id="settingsBtn">
       <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
@@ -385,6 +365,6 @@
 <!-- ═══════════════════════════ TOAST ═══════════════════════════ -->
 <div class="toast-container" id="toastContainer"></div>
 
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>
