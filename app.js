@@ -983,7 +983,7 @@ function render(opps) {
           ${tokenIconHTML(o.symbol)}
           <div>
             <div class="token-name">${o.symbol}${o.riskThin ? '<span class="risk-chip rc-thin" title="任一腿24h成交额偏低，挂单薄、滑点大">薄盘</span>' : ''}${o.riskWide ? '<span class="risk-chip rc-wide" title="两所价差偏大，可能非同一资产或流动性差">价差大</span>' : ''}${o.consistency !== undefined ? `<span class="risk-chip rc-consist" title="过去7天当前多空方向成立的比例；越高越稳">一致${Math.round(o.consistency*100)}%</span>` : ''}</div>
-            <div class="token-sub">${o.consistency !== undefined ? `实现年化 ${o.realizedApr.toFixed(0)}% · 顺向最长${o.favStreak}连 · 翻转${o.flips}次` : 'PERP · USDT'}</div>
+            <div class="token-sub">${o.netUSD !== undefined ? `净 +$${o.netUSD.toFixed(2)}/$1k · 一致${Math.round(o.consistency*100)}% · 扣费扣滑点后` : (o.consistency !== undefined ? `实现年化 ${o.realizedApr.toFixed(0)}% · 顺向最长${o.favStreak}连` : 'PERP · USDT')}</div>
           </div>
         </div>
       </td>
@@ -3270,14 +3270,27 @@ function computeStability(frA, frB) {
   for (let i = 1; i < n; i++) if (nets[i] * nets[i - 1] < 0) flips++;
   let streak = 0, best = 0;
   nets.forEach(x => { if (x > 0) { streak++; best = Math.max(best, streak); } else streak = 0; });
-  const avgNet = nets.reduce((s, x) => s + x, 0) / n;
+  const totalGross = nets.reduce((s, x) => s + x, 0);
+  const avgNet = totalGross / n;
   return {
     settlements: n,
     consistency: pos / n,                      // 方向一致性
     flips,                                      // 符号翻转次数
     favStreak: best,                            // 最长顺向连续
+    totalGross,                                 // 7天累计实现费率(比例)
     realizedApr: avgNet * (HOURS_PER_YEAR / 8) * 100,  // 真实实现年化（含翻转拖累）
   };
+}
+
+// 深度缓存（供精选算滑点）
+const _depthCache = {};
+async function cachedDepth(ex, sym) {
+  const k = ex + ':' + sym, now = Date.now();
+  const c = _depthCache[k];
+  if (c && now - c.ts < 5 * 60 * 1000) return c.data;
+  const d = await fetchOrderbookDepth(ex, sym);
+  _depthCache[k] = { ts: now, data: d };
+  return d;
 }
 
 async function runCuratedScreen() {
@@ -3289,9 +3302,12 @@ async function runCuratedScreen() {
   const setMsg = (m) => { if (body) body.innerHTML = `<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--text-secondary)">${m}</td></tr>`; };
   document.getElementById('arbTable').style.display = 'table';
   document.getElementById('emptyState').style.display = 'none';
-  setMsg(`✨ 精选计算中… 正在回测 ${cands.length} 个候选的 7 天资金费`);
+  const notional = parseFloat(document.getElementById('notionalInput')?.value || 1000);
+  const CONC = 5;
 
-  const out = [], CONC = 5;
+  // ── 阶段1：回测资金费历史 → 方向一致性 + 「资金费能否盖住手续费」(便宜，不拉深度) ──
+  setMsg(`✨ 精选 · 阶段1/2 回测资金费… 0/${cands.length}`);
+  const stageA = [];
   for (let i = 0; i < cands.length; i += CONC) {
     await Promise.all(cands.slice(i, i + CONC).map(async o => {
       try {
@@ -3300,20 +3316,40 @@ async function runCuratedScreen() {
           cachedHistFunding(o.shortEx, o.symbol),
         ]);
         const st = computeStability(frA, frB);
-        if (st) out.push({ ...o, ...st });
+        if (st) stageA.push({ ...o, ...st, grossUSD: st.totalGross * notional });
       } catch (e) {}
     }));
-    setMsg(`✨ 精选计算中… ${Math.min(i + CONC, cands.length)}/${cands.length}`);
+    setMsg(`✨ 精选 · 阶段1/2 回测资金费… ${Math.min(i + CONC, cands.length)}/${cands.length}`);
   }
+  const feePass = stageA.filter(o =>
+    o.settlements >= CURATE_MIN_SETTLE &&
+    o.consistency >= CURATE_MIN_CONSISTENCY &&
+    o.grossUSD > calcRoundTripFee(o.longEx, o.shortEx) * notional);   // 资金费必须盖住手续费
 
-  const passed = out
-    .filter(o => o.settlements >= CURATE_MIN_SETTLE && o.consistency >= CURATE_MIN_CONSISTENCY && o.realizedApr > 0)
-    .sort((a, b) => b.realizedApr - a.realizedApr);
+  // ── 阶段2：对幸存者拉深度算滑点 → 要求「扣手续费+滑点后净>0」，按净收益排序 ──
+  const passed = [];
+  for (let i = 0; i < feePass.length; i += CONC) {
+    await Promise.all(feePass.slice(i, i + CONC).map(async o => {
+      try {
+        const [dL, dS] = await Promise.all([
+          cachedDepth(o.longEx, o.symbol),
+          cachedDepth(o.shortEx, o.symbol),
+        ]);
+        const slip = estimateSlippageUSD(dL, dS, notional);
+        const feeUSD = calcRoundTripFee(o.longEx, o.shortEx) * notional;
+        const netUSD = o.grossUSD - feeUSD - (slip || 0);
+        if (netUSD > 0) passed.push({ ...o, netUSD, netPct: netUSD / notional * 100 });
+      } catch (e) {}
+    }));
+    setMsg(`✨ 精选 · 阶段2/2 核算滑点… ${Math.min(i + CONC, feePass.length)}/${feePass.length}`);
+  }
+  passed.sort((a, b) => b.netUSD - a.netUSD);   // 按扣成本后净收益排序
 
   state.curatedList = passed;
   curatedBusy = false;
-  if (!passed.length) { setMsg(`✨ ${cands.length} 个候选里没有方向足够稳定的（需一致性≥${Math.round(CURATE_MIN_CONSISTENCY*100)}% 且历史净费率为正）。多数当前高年化其实是瞬时尖峰、方向不持续。可调低顶部 CURATE_* 阈值，或降「最低年化」纳入更多候选。`); }
-  else render(passed);
+  if (!passed.length) {
+    setMsg(`✨ ${cands.length} 个候选里没有「扣手续费+滑点后仍为正」的稳定机会。<br>多数当前高年化是瞬时尖峰(方向不持续)，或资金费盖不住成本。可降「最低年化」纳入更多候选，或调顶部 CURATE_* 阈值。`);
+  } else render(passed);
 }
 
 function exitCurated() {
