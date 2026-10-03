@@ -23,6 +23,7 @@ const MAX_SPREAD_PCT   = 3;        // 当前价差超过此值 → 多半不是�
 const MIN_LEG_VOL_USD  = 500000;   // 任一腿 24h 成交额低于此值 → 薄盘，直接剔除
 const WARN_SPREAD_PCT  = 1;        // 价差超过此值 → 行内黄色「价差大」标记
 const WARN_VOL_USD     = 3000000;  // 任一腿成交额低于此值 → 行内「薄盘」标记
+const EXTREME_FR8H     = 0.003;    // 任一腿 |8h资金费| 超过 0.3% → 极端/触顶费率，年化虚高不可持续
 
 // ============================================================
 // FEE SCHEDULE (Taker fee %, default VIP0)
@@ -807,6 +808,7 @@ function buildArbitrages(markets, tab) {
           minVol: minLegVol,
           riskWide: spreadAbs > WARN_SPREAD_PCT,     // 行内标记：价差偏大
           riskThin: (volA > 0 && volA < WARN_VOL_USD) || (volB > 0 && volB < WARN_VOL_USD), // 薄盘(确知低才标)
+          riskExtreme: Math.abs(longFr) >= EXTREME_FR8H || Math.abs(shortFr) >= EXTREME_FR8H, // 极端费率(尖峰/触顶,年化虚高)
           fundingIntervalA: mA.fundingInterval,
           fundingIntervalB: mB.fundingInterval,
         });
@@ -982,7 +984,7 @@ function render(opps) {
         <div class="token-cell">
           ${tokenIconHTML(o.symbol)}
           <div>
-            <div class="token-name">${o.symbol}${o.riskThin ? '<span class="risk-chip rc-thin" title="任一腿24h成交额偏低，挂单薄、滑点大">薄盘</span>' : ''}${o.riskWide ? '<span class="risk-chip rc-wide" title="两所价差偏大，可能非同一资产或流动性差">价差大</span>' : ''}${o.consistency !== undefined ? `<span class="risk-chip rc-consist" title="过去7天当前多空方向成立的比例；越高越稳">一致${Math.round(o.consistency*100)}%</span>` : ''}</div>
+            <div class="token-name">${o.symbol}${o.riskExtreme ? '<span class="risk-chip rc-extreme" title="当前资金费率异常高(尖峰/接近交易所上限)，难以持续，年化参考意义低">极端费率</span>' : ''}${o.riskThin ? '<span class="risk-chip rc-thin" title="任一腿24h成交额偏低，挂单薄、滑点大">薄盘</span>' : ''}${o.riskWide ? '<span class="risk-chip rc-wide" title="两所价差偏大，可能非同一资产或流动性差">价差大</span>' : ''}${o.consistency !== undefined ? `<span class="risk-chip rc-consist" title="过去7天当前多空方向成立的比例；越高越稳">一致${Math.round(o.consistency*100)}%</span>` : ''}</div>
             <div class="token-sub">${o.consistency !== undefined ? `实现年化 ${o.realizedApr.toFixed(0)}% · 顺向最长${o.favStreak}连 · 翻转${o.flips}次` : 'PERP · USDT'}</div>
           </div>
         </div>
