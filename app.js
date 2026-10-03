@@ -776,11 +776,13 @@ function buildArbitrages(markets, tab) {
         if (frA < frB) { longEx=exA; shortEx=exB; longFr=frA; shortFr=frB; }
         else           { longEx=exB; shortEx=exA; longFr=frB; shortFr=frA; }
 
-        // ── 垃圾过滤：价差过大(非同一资产) / 薄盘 直接剔除 ──
+        // ── 垃圾过滤 ──
         const spreadAbs = Math.abs(spreadPct);
-        const minLegVol = Math.min(mA.volume24h || 0, mB.volume24h || 0);
-        if (spreadAbs > MAX_SPREAD_PCT) continue;      // 价差>3%：几乎必是同名不同币/死盘
-        if (minLegVol < MIN_LEG_VOL_USD) continue;     // 任一腿成交额过低：薄盘不可成交
+        const volA = mA.volume24h || 0, volB = mB.volume24h || 0;
+        const minLegVol = Math.min(volA, volB);
+        if (spreadAbs > MAX_SPREAD_PCT) continue;      // 价差>3%：几乎必是同名不同币/死盘，剔除
+        // 成交额：仅当"确知"某腿>0且低于下限才剔除；未知(0，可能 WS 还没推到)不误杀
+        if ((volA > 0 && volA < MIN_LEG_VOL_USD) || (volB > 0 && volB < MIN_LEG_VOL_USD)) continue;
 
         const annualFundingApr = frDiff * (HOURS_PER_YEAR / 8) * 100;
         const spreadArb = Math.abs(spreadPct) - 0.2;
@@ -804,7 +806,7 @@ function buildArbitrages(markets, tab) {
           longVolume:  mA.volume24h||0, shortVolume: mB.volume24h||0,
           minVol: minLegVol,
           riskWide: spreadAbs > WARN_SPREAD_PCT,     // 行内标记：价差偏大
-          riskThin: minLegVol < WARN_VOL_USD,        // 行内标记：薄盘
+          riskThin: (volA > 0 && volA < WARN_VOL_USD) || (volB > 0 && volB < WARN_VOL_USD), // 薄盘(确知低才标)
           fundingIntervalA: mA.fundingInterval,
           fundingIntervalB: mB.fundingInterval,
         });
