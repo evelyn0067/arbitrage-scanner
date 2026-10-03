@@ -574,6 +574,18 @@ input[type="range"]::-webkit-slider-thumb {
   font-weight: 500;
   letter-spacing: .3px;
 }
+.risk-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  vertical-align: middle;
+  line-height: 1.5;
+}
+.rc-thin { background: color-mix(in srgb, var(--down) 14%, transparent); color: var(--down); border: 1px solid color-mix(in srgb, var(--down) 34%, transparent); }
+.rc-wide { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 34%, transparent); }
 
 /* ── Exchange badge ── */
 .ex-cell { display: flex; align-items: center; gap: 7px; }
