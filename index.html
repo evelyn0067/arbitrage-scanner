@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 
@@ -80,6 +80,12 @@
       <option value="spread_desc">价差 ↓</option>
       <option value="vol_desc">成交量 ↓</option>
     </select>
+  </div>
+
+  <div class="filter-sep"></div>
+
+  <div class="filter-group">
+    <button class="btn-curate" id="curateBtn" title="对当前候选批量回测7天资金费，按方向一致性筛选并重排，剔除方向翻转频繁的">✨ 精选</button>
   </div>
 
   <div class="filter-sep"></div>
@@ -365,6 +371,6 @@
 <!-- ═══════════════════════════ TOAST ═══════════════════════════ -->
 <div class="toast-container" id="toastContainer"></div>
 
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>
