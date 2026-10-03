@@ -382,6 +382,29 @@ input[type="range"]::-webkit-slider-thumb {
   white-space: nowrap;
 }
 .btn-auto-refresh:hover { color: var(--text-primary); }
+
+/* 精选按钮 */
+.btn-curate {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--brand-dim);
+  border: 1px solid color-mix(in srgb, var(--brand) 32%, transparent);
+  color: var(--brand);
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.btn-curate:hover { background: color-mix(in srgb, var(--brand) 16%, transparent); }
+.btn-curate.active {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
+}
+.rc-consist { background: color-mix(in srgb, var(--up) 14%, transparent); color: var(--up); border: 1px solid color-mix(in srgb, var(--up) 34%, transparent); }
 .dot {
   width: 6px; height: 6px;
   border-radius: 50%;
