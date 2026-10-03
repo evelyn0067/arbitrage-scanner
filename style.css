@@ -609,7 +609,6 @@ input[type="range"]::-webkit-slider-thumb {
 }
 .rc-thin { background: color-mix(in srgb, var(--down) 14%, transparent); color: var(--down); border: 1px solid color-mix(in srgb, var(--down) 34%, transparent); }
 .rc-wide { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 34%, transparent); }
-.rc-extreme { background: color-mix(in srgb, var(--purple) 15%, transparent); color: var(--purple); border: 1px solid color-mix(in srgb, var(--purple) 36%, transparent); }
 
 /* ── Exchange badge ── */
 .ex-cell { display: flex; align-items: center; gap: 7px; }
