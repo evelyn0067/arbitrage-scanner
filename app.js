@@ -23,7 +23,6 @@ const MAX_SPREAD_PCT   = 3;        // 当前价差超过此值 → 多半不是�
 const MIN_LEG_VOL_USD  = 500000;   // 任一腿 24h 成交额低于此值 → 薄盘，直接剔除
 const WARN_SPREAD_PCT  = 1;        // 价差超过此值 → 行内黄色「价差大」标记
 const WARN_VOL_USD     = 3000000;  // 任一腿成交额低于此值 → 行内「薄盘」标记
-const EXTREME_FR8H     = 0.003;    // 任一腿 |8h资金费| 超过 0.3% → 极端/触顶费率，年化虚高不可持续
 
 // ============================================================
 // FEE SCHEDULE (Taker fee %, default VIP0)
@@ -808,7 +807,6 @@ function buildArbitrages(markets, tab) {
           minVol: minLegVol,
           riskWide: spreadAbs > WARN_SPREAD_PCT,     // 行内标记：价差偏大
           riskThin: (volA > 0 && volA < WARN_VOL_USD) || (volB > 0 && volB < WARN_VOL_USD), // 薄盘(确知低才标)
-          riskExtreme: Math.abs(longFr) >= EXTREME_FR8H || Math.abs(shortFr) >= EXTREME_FR8H, // 极端费率(尖峰/触顶,年化虚高)
           fundingIntervalA: mA.fundingInterval,
           fundingIntervalB: mB.fundingInterval,
         });
@@ -984,7 +982,7 @@ function render(opps) {
         <div class="token-cell">
           ${tokenIconHTML(o.symbol)}
           <div>
-            <div class="token-name">${o.symbol}${o.riskExtreme ? '<span class="risk-chip rc-extreme" title="当前资金费率异常高(尖峰/接近交易所上限)，难以持续，年化参考意义低">极端费率</span>' : ''}${o.riskThin ? '<span class="risk-chip rc-thin" title="任一腿24h成交额偏低，挂单薄、滑点大">薄盘</span>' : ''}${o.riskWide ? '<span class="risk-chip rc-wide" title="两所价差偏大，可能非同一资产或流动性差">价差大</span>' : ''}${o.consistency !== undefined ? `<span class="risk-chip rc-consist" title="过去7天当前多空方向成立的比例；越高越稳">一致${Math.round(o.consistency*100)}%</span>` : ''}</div>
+            <div class="token-name">${o.symbol}${o.riskThin ? '<span class="risk-chip rc-thin" title="任一腿24h成交额偏低，挂单薄、滑点大">薄盘</span>' : ''}${o.riskWide ? '<span class="risk-chip rc-wide" title="两所价差偏大，可能非同一资产或流动性差">价差大</span>' : ''}${o.consistency !== undefined ? `<span class="risk-chip rc-consist" title="过去7天当前多空方向成立的比例；越高越稳">一致${Math.round(o.consistency*100)}%</span>` : ''}</div>
             <div class="token-sub">${o.consistency !== undefined ? `实现年化 ${o.realizedApr.toFixed(0)}% · 顺向最长${o.favStreak}连 · 翻转${o.flips}次` : 'PERP · USDT'}</div>
           </div>
         </div>
@@ -3219,9 +3217,9 @@ function ensureMkt(ex) { if (!state.markets[ex]) state.markets[ex] = {}; return 
 // 「精选」稳定性筛选：对候选批量回测 7 天资金费，按方向一致性筛选重排
 // 核心：方向翻转频繁的对，realizedApr(真实实现年化)会被负结算拖低甚至为负，自动沉底/剔除
 // ============================================================
-const CURATE_TOP_N          = 20;     // 粗筛候选数（只对这些拉历史，控制请求量）
-const CURATE_MIN_SETTLE     = 10;     // 至少这么多次结算才有统计意义
-const CURATE_MIN_CONSISTENCY= 0.70;   // 方向一致性阈值（当前多空方向成立的比例）
+const CURATE_TOP_N          = 50;     // 粗筛候选数（池子要够宽，否则全是尖峰极端费率的，稳的进不来）
+const CURATE_MIN_SETTLE     = 8;      // 至少这么多次结算才有统计意义
+const CURATE_MIN_CONSISTENCY= 0.62;   // 方向一致性阈值（当前多空方向成立的比例）
 let curatedMode = false, curatedBusy = false;
 const _histFundingCache = {};         // `${ex}:${sym}` -> {ts, data}
 
@@ -3272,7 +3270,7 @@ async function runCuratedScreen() {
   document.getElementById('emptyState').style.display = 'none';
   setMsg(`✨ 精选计算中… 正在回测 ${cands.length} 个候选的 7 天资金费`);
 
-  const out = [], CONC = 4;
+  const out = [], CONC = 5;
   for (let i = 0; i < cands.length; i += CONC) {
     await Promise.all(cands.slice(i, i + CONC).map(async o => {
       try {
@@ -3293,7 +3291,7 @@ async function runCuratedScreen() {
 
   state.curatedList = passed;
   curatedBusy = false;
-  if (!passed.length) { setMsg('✨ 没有方向足够稳定的机会（一致性≥' + Math.round(CURATE_MIN_CONSISTENCY*100) + '% 且历史净费率为正）。可降低最低年化或稍后再试。'); }
+  if (!passed.length) { setMsg(`✨ ${cands.length} 个候选里没有方向足够稳定的（需一致性≥${Math.round(CURATE_MIN_CONSISTENCY*100)}% 且历史净费率为正）。多数当前高年化其实是瞬时尖峰、方向不持续。可调低顶部 CURATE_* 阈值，或降「最低年化」纳入更多候选。`); }
   else render(passed);
 }
 
