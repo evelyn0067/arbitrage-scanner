@@ -3293,63 +3293,75 @@ async function cachedDepth(ex, sym) {
   return d;
 }
 
+// 给任意 promise 加超时兜底（防止单个卡住的请求拖死整个精选）
+function withTimeout(p, ms, fallback) {
+  return Promise.race([
+    Promise.resolve(p).catch(() => fallback),
+    new Promise(res => setTimeout(() => res(fallback), ms)),
+  ]);
+}
+
 async function runCuratedScreen() {
   if (curatedBusy) return;
   curatedBusy = true; curatedMode = true;
   document.getElementById('curateBtn')?.classList.add('active');
-  const cands = filterAndSort(state.arbitrages).slice(0, CURATE_TOP_N);
   const body = document.getElementById('arbTableBody');
   const setMsg = (m) => { if (body) body.innerHTML = `<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--text-secondary)">${m}</td></tr>`; };
-  document.getElementById('arbTable').style.display = 'table';
-  document.getElementById('emptyState').style.display = 'none';
-  const notional = parseFloat(document.getElementById('notionalInput')?.value || 1000);
-  const CONC = 5;
+  try {
+    const cands = filterAndSort(state.arbitrages).slice(0, CURATE_TOP_N);
+    document.getElementById('arbTable').style.display = 'table';
+    document.getElementById('emptyState').style.display = 'none';
+    const notional = parseFloat(document.getElementById('notionalInput')?.value || 1000);
+    const CONC = 8, REQ_TIMEOUT = 8000;
 
-  // ── 阶段1：回测资金费历史 → 方向一致性 + 「资金费能否盖住手续费」(便宜，不拉深度) ──
-  setMsg(`✨ 精选 · 阶段1/2 回测资金费… 0/${cands.length}`);
-  const stageA = [];
-  for (let i = 0; i < cands.length; i += CONC) {
-    await Promise.all(cands.slice(i, i + CONC).map(async o => {
-      try {
+    if (!cands.length) { setMsg('✨ 当前没有候选可精选（先确认实时列表有数据、最低年化不要太高）。'); return; }
+
+    // ── 阶段1：回测资金费历史 → 方向一致性 + 「资金费能否盖住手续费」(便宜，不拉深度) ──
+    setMsg(`✨ 精选 · 阶段1/2 回测资金费… 0/${cands.length}`);
+    const stageA = [];
+    for (let i = 0; i < cands.length; i += CONC) {
+      await Promise.all(cands.slice(i, i + CONC).map(async o => {
         const [frA, frB] = await Promise.all([
-          cachedHistFunding(o.longEx, o.symbol),
-          cachedHistFunding(o.shortEx, o.symbol),
+          withTimeout(cachedHistFunding(o.longEx, o.symbol), REQ_TIMEOUT, []),
+          withTimeout(cachedHistFunding(o.shortEx, o.symbol), REQ_TIMEOUT, []),
         ]);
         const st = computeStability(frA, frB);
         if (st) stageA.push({ ...o, ...st, grossUSD: st.totalGross * notional });
-      } catch (e) {}
-    }));
-    setMsg(`✨ 精选 · 阶段1/2 回测资金费… ${Math.min(i + CONC, cands.length)}/${cands.length}`);
-  }
-  const feePass = stageA.filter(o =>
-    o.settlements >= CURATE_MIN_SETTLE &&
-    o.consistency >= CURATE_MIN_CONSISTENCY &&
-    o.grossUSD > calcRoundTripFee(o.longEx, o.shortEx) * notional);   // 资金费必须盖住手续费
+      }));
+      setMsg(`✨ 精选 · 阶段1/2 回测资金费… ${Math.min(i + CONC, cands.length)}/${cands.length}`);
+    }
+    const feePass = stageA.filter(o =>
+      o.settlements >= CURATE_MIN_SETTLE &&
+      o.consistency >= CURATE_MIN_CONSISTENCY &&
+      o.grossUSD > calcRoundTripFee(o.longEx, o.shortEx) * notional);   // 资金费必须盖住手续费
 
-  // ── 阶段2：对幸存者拉深度算滑点 → 要求「扣手续费+滑点后净>0」，按净收益排序 ──
-  const passed = [];
-  for (let i = 0; i < feePass.length; i += CONC) {
-    await Promise.all(feePass.slice(i, i + CONC).map(async o => {
-      try {
+    // ── 阶段2：对幸存者拉深度算滑点 → 要求「扣手续费+滑点后净>0」，按净收益排序 ──
+    const passed = [];
+    for (let i = 0; i < feePass.length; i += CONC) {
+      await Promise.all(feePass.slice(i, i + CONC).map(async o => {
         const [dL, dS] = await Promise.all([
-          cachedDepth(o.longEx, o.symbol),
-          cachedDepth(o.shortEx, o.symbol),
+          withTimeout(cachedDepth(o.longEx, o.symbol), REQ_TIMEOUT, null),
+          withTimeout(cachedDepth(o.shortEx, o.symbol), REQ_TIMEOUT, null),
         ]);
         const slip = estimateSlippageUSD(dL, dS, notional);
         const feeUSD = calcRoundTripFee(o.longEx, o.shortEx) * notional;
         const netUSD = o.grossUSD - feeUSD - (slip || 0);
         if (netUSD > 0) passed.push({ ...o, netUSD, netPct: netUSD / notional * 100 });
-      } catch (e) {}
-    }));
-    setMsg(`✨ 精选 · 阶段2/2 核算滑点… ${Math.min(i + CONC, feePass.length)}/${feePass.length}`);
-  }
-  passed.sort((a, b) => b.netUSD - a.netUSD);   // 按扣成本后净收益排序
+      }));
+      setMsg(`✨ 精选 · 阶段2/2 核算滑点… ${Math.min(i + CONC, feePass.length)}/${feePass.length}`);
+    }
+    passed.sort((a, b) => b.netUSD - a.netUSD);   // 按扣成本后净收益排序
 
-  state.curatedList = passed;
-  curatedBusy = false;
-  if (!passed.length) {
-    setMsg(`✨ ${cands.length} 个候选里没有「扣手续费+滑点后仍为正」的稳定机会。<br>多数当前高年化是瞬时尖峰(方向不持续)，或资金费盖不住成本。可降「最低年化」纳入更多候选，或调顶部 CURATE_* 阈值。`);
-  } else render(passed);
+    state.curatedList = passed;
+    if (!passed.length) {
+      setMsg(`✨ ${cands.length} 个候选里没有「扣手续费+滑点后仍为正」的稳定机会。<br>多数当前高年化是瞬时尖峰(方向不持续)，或资金费盖不住成本。可降「最低年化」纳入更多候选，或调顶部 CURATE_* 阈值。`);
+    } else render(passed);
+  } catch (e) {
+    console.warn('curate:', e.message);
+    setMsg('✨ 精选计算出错，请重试。' + (e.message || ''));
+  } finally {
+    curatedBusy = false;   // 无论成功失败都复位，避免卡住后点不动
+  }
 }
 
 function exitCurated() {
