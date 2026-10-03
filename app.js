@@ -18,6 +18,12 @@ const EXCHANGES = {
 
 const HOURS_PER_YEAR = 8760;
 
+// ── 垃圾机会过滤 / 风险标记阈值（列表层可廉价计算，可调）──
+const MAX_SPREAD_PCT   = 3;        // 当前价差超过此值 → 多半不是同一资产(同名不同币/死盘)，直接剔除
+const MIN_LEG_VOL_USD  = 500000;   // 任一腿 24h 成交额低于此值 → 薄盘，直接剔除
+const WARN_SPREAD_PCT  = 1;        // 价差超过此值 → 行内黄色「价差大」标记
+const WARN_VOL_USD     = 3000000;  // 任一腿成交额低于此值 → 行内「薄盘」标记
+
 // ============================================================
 // FEE SCHEDULE (Taker fee %, default VIP0)
 // Open + Close = 2 × taker per side, total = 4 × taker for both legs
@@ -770,6 +776,12 @@ function buildArbitrages(markets, tab) {
         if (frA < frB) { longEx=exA; shortEx=exB; longFr=frA; shortFr=frB; }
         else           { longEx=exB; shortEx=exA; longFr=frB; shortFr=frA; }
 
+        // ── 垃圾过滤：价差过大(非同一资产) / 薄盘 直接剔除 ──
+        const spreadAbs = Math.abs(spreadPct);
+        const minLegVol = Math.min(mA.volume24h || 0, mB.volume24h || 0);
+        if (spreadAbs > MAX_SPREAD_PCT) continue;      // 价差>3%：几乎必是同名不同币/死盘
+        if (minLegVol < MIN_LEG_VOL_USD) continue;     // 任一腿成交额过低：薄盘不可成交
+
         const annualFundingApr = frDiff * (HOURS_PER_YEAR / 8) * 100;
         const spreadArb = Math.abs(spreadPct) - 0.2;
         let apr = 0;
@@ -786,10 +798,13 @@ function buildArbitrages(markets, tab) {
           shortPrice: markets[shortEx][sym].markPx,
           longFr8h: longFr, shortFr8h: shortFr,
           frDiff8h: frDiff, spreadPct,
-          spreadAbs: Math.abs(spreadPct),
+          spreadAbs,
           apr, annualFundingApr,
           nextFundingTime: isFinite(nextFunding) ? nextFunding : 0,
           longVolume:  mA.volume24h||0, shortVolume: mB.volume24h||0,
+          minVol: minLegVol,
+          riskWide: spreadAbs > WARN_SPREAD_PCT,     // 行内标记：价差偏大
+          riskThin: minLegVol < WARN_VOL_USD,        // 行内标记：薄盘
           fundingIntervalA: mA.fundingInterval,
           fundingIntervalB: mB.fundingInterval,
         });
@@ -965,7 +980,7 @@ function render(opps) {
         <div class="token-cell">
           ${tokenIconHTML(o.symbol)}
           <div>
-            <div class="token-name">${o.symbol}</div>
+            <div class="token-name">${o.symbol}${o.riskThin ? '<span class="risk-chip rc-thin" title="任一腿24h成交额偏低，挂单薄、滑点大">薄盘</span>' : ''}${o.riskWide ? '<span class="risk-chip rc-wide" title="两所价差偏大，可能非同一资产或流动性差">价差大</span>' : ''}</div>
             <div class="token-sub">PERP · USDT</div>
           </div>
         </div>
@@ -1871,7 +1886,7 @@ function renderHist7dPnl(frA, frB, opp, depthLong = null, depthShort = null) {
       </div>
       <div class="hist-pnl-item">
         <span class="hist-pnl-label">资金费毛收入</span>
-        <span class="hist-pnl-val" style="color:var(--up)">+$${grossUSD.toFixed(2)}</span>
+        <span class="hist-pnl-val" style="color:${grossUSD >= 0 ? 'var(--up)' : 'var(--down)'}">${grossUSD >= 0 ? '+' : '−'}$${Math.abs(grossUSD).toFixed(2)}</span>
         <span class="hist-pnl-sub">${settlements} 次结算 · 胜率 ${winRate}%</span>
       </div>
       <div class="hist-pnl-item">
@@ -1895,7 +1910,7 @@ function renderHist7dPnl(frA, frB, opp, depthLong = null, depthShort = null) {
     </div>
     ${negHtml}
     <div class="fee-detail-row">
-      <b>综合口径</b>：资金费 <span style="color:var(--up)">+$${grossUSD.toFixed(2)}</span>
+      <b>综合口径</b>：资金费 <span style="color:${grossUSD >= 0 ? 'var(--up)' : 'var(--down)'}">${grossUSD >= 0 ? '+' : '−'}$${Math.abs(grossUSD).toFixed(2)}</span>
       ${basisOk ? `＋ 价差 <span style="color:${basisColor}">${basisSign}$${Math.abs(basisUSD).toFixed(2)}</span>` : ''}
       − 手续费 <span style="color:var(--down)">$${feeTotal.toFixed(2)}</span>
       ${slipReady ? `− 滑点 <span style="color:var(--down)">$${slippageUSD.toFixed(2)}</span>` : ''}
