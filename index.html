@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ArbiScan — CEX/DEX 套利扫描器</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=5">
+  <script>
+    // 首屏前应用已保存主题，避免闪烁
+    try { var _t = localStorage.getItem('arbi_theme');
+      if (_t && _t !== 'light') document.documentElement.setAttribute('data-theme', _t); } catch (e) {}
+  </script>
+</head>
+<body>
+
+<!-- ═══════════════════════════ NAV ═══════════════════════════ -->
+<nav class="topnav">
+  <div class="nav-left">
+    <span class="logo">
+      <span class="logo-icon">⚡</span>
+      ArbiScan
+    </span>
+    <span class="nav-badge">LIVE</span>
+  </div>
+
+  <div class="nav-center">
+    <button class="tab-btn active" data-tab="funding">资金费率套利</button>
+    <button class="tab-btn" data-tab="price">价差套利</button>
+    <button class="tab-btn" data-tab="basis">期现套利</button>
+  </div>
+
+  <div class="nav-right">
+    <span class="update-time" id="updateTime">--</span>
+    <div class="theme-switch" id="themeSwitch">
+      <button class="btn-icon" id="themeBtn" title="切换主题">🎨</button>
+      <div class="theme-menu" id="themeMenu" hidden>
+        <div class="theme-menu-title">简约</div>
+        <button class="theme-opt" data-theme="light"><span class="theme-sw sw-light"></span>极简白</button>
+        <button class="theme-opt" data-theme="paper"><span class="theme-sw sw-paper"></span>暖纸</button>
+        <button class="theme-opt" data-theme="midnight"><span class="theme-sw sw-midnight"></span>午夜蓝</button>
+        <div class="theme-menu-title" style="margin-top:4px">有趣</div>
+        <button class="theme-opt" data-theme="pop"><span class="theme-sw sw-pop"></span>波普涂鸦</button>
+        <button class="theme-opt" data-theme="candy"><span class="theme-sw sw-candy"></span>糖果马卡龙</button>
+        <button class="theme-opt" data-theme="synthwave"><span class="theme-sw sw-synthwave"></span>蒸汽波</button>
+        <button class="theme-opt" data-theme="arcade"><span class="theme-sw sw-arcade"></span>像素机厅</button>
+      </div>
+    </div>
+    <button class="btn-icon" id="refreshBtn" title="刷新数据">↻</button>
+    <button class="btn-settings" id="settingsBtn">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8 10.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
+        <path d="M9.94 1.08a.75.75 0 0 0-.88-.55l-1.07.27a.75.75 0 0 0-.55.88l.1.39a5.3 5.3 0 0 0-.93.54l-.37-.18a.75.75 0 0 0-1 .33l-.5.87a.75.75 0 0 0 .33 1.02l.38.2a5.4 5.4 0 0 0-.02 1.07l-.38.2a.75.75 0 0 0-.28 1.03l.5.87a.75.75 0 0 0 1.03.28l.37-.19c.28.21.59.39.92.54l-.1.38a.75.75 0 0 0 .55.9l1.07.26a.75.75 0 0 0 .9-.55l.1-.38a5.3 5.3 0 0 0 1.06-.43l.33.16a.75.75 0 0 0 1-.32l.5-.87a.75.75 0 0 0-.33-1.02l-.32-.17a5.4 5.4 0 0 0 .04-1.08l.33-.17a.75.75 0 0 0 .28-1.03l-.5-.87a.75.75 0 0 0-1.02-.28l-.33.16a5.3 5.3 0 0 0-1.06-.43l-.1-.39Z"/>
+      </svg>
+      API 设置
+    </button>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════ FILTER BAR ═══════════════════════════ -->
+<div class="filter-bar">
+  <div class="filter-group">
+    <span class="filter-label">交易所</span>
+    <div class="exchange-chips" id="exchangeChips">
+      <span class="chip active" data-ex="HL">Hyperliquid</span>
+      <span class="chip active" data-ex="ASTER">AsterDEX</span>
+      <span class="chip active" data-ex="BINANCE">Binance</span>
+      <span class="chip active" data-ex="OKX">OKX</span>
+      <span class="chip active" data-ex="BYBIT">Bybit</span>
+      <span class="chip active" data-ex="GATE">Gate</span>
+    </div>
+  </div>
+
+  <div class="filter-sep"></div>
+
+  <div class="filter-group">
+    <span class="filter-label">最低年化</span>
+    <input type="range" id="minApr" min="0" max="200" value="10" step="5">
+    <span class="apr-val-badge" id="minAprVal">10%</span>
+  </div>
+
+  <div class="filter-sep"></div>
+
+  <div class="filter-group">
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input type="text" id="searchInput" placeholder="BTC, ETH…" class="search-input">
+    </div>
+  </div>
+
+  <div class="filter-sep"></div>
+
+  <div class="filter-group">
+    <span class="filter-label">排序</span>
+    <select id="sortSelect" class="sort-select">
+      <option value="apr_desc">年化 ↓</option>
+      <option value="apr_asc">年化 ↑</option>
+      <option value="spread_desc">价差 ↓</option>
+      <option value="vol_desc">成交量 ↓</option>
+    </select>
+  </div>
+
+  <div class="filter-sep"></div>
+
+  <div class="filter-group">
+    <button class="btn-auto-refresh" id="autoRefreshBtn">
+      <span class="dot green"></span>
+      自动刷新
+      <span class="countdown-badge" id="countdown">30s</span>
+    </button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ STATS BAR ═══════════════════════════ -->
+<div class="stats-bar">
+  <div class="stat-card">
+    <span class="stat-label">套利机会</span>
+    <span class="stat-value" id="totalOpp">--</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">最高年化</span>
+    <span class="stat-value green" id="maxApr">--</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">平均资金费差</span>
+    <span class="stat-value" id="avgFunding">--</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">覆盖交易对</span>
+    <span class="stat-value" id="activePairs">--</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ TABLE ═══════════════════════════ -->
+<div class="main-content">
+  <div class="main-split">
+  <div class="table-container" id="tableContainer">
+
+    <div class="loading-state" id="loadingState">
+      <div class="spinner"></div>
+      <p class="loading-text">正在扫描市场数据…</p>
+    </div>
+
+    <table class="arb-table" id="arbTable" style="display:none">
+      <thead>
+        <tr>
+          <th>代币</th>
+          <th>做多交易所</th>
+          <th>做空交易所</th>
+          <th>多头资金费</th>
+          <th>空头资金费</th>
+          <th>费率差 /8h</th>
+          <th class="highlight-col">年化收益</th>
+          <th>当前价差</th>
+          <th>下次结算</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="arbTableBody"></tbody>
+    </table>
+
+    <div class="empty-state" id="emptyState" style="display:none">
+      <div class="empty-icon">◎</div>
+      <p class="empty-text">暂无符合条件的套利机会</p>
+    </div>
+
+  </div>
+
+  <!-- ═══ AUTO ARBI PANEL ═══ -->
+  <div class="auto-arbi-sidebar">
+    <div id="autoArbiPanel"></div>
+  </div>
+
+  </div><!-- end .main-split -->
+</div>
+
+<!-- ═══════════════════════════ DETAIL DRAWER ═══════════════════════════ -->
+<div class="drawer-overlay" id="drawerOverlay"></div>
+<div class="detail-drawer" id="detailDrawer">
+
+  <!-- Header -->
+  <div class="drawer-header">
+    <div class="drawer-header-top">
+      <div class="drawer-token-info" id="drawerTokenInfo">
+        <!-- filled by JS -->
+      </div>
+      <div class="drawer-header-actions">
+        <button class="btn-both btn-action" id="drawerBtnBoth" style="padding:8px 18px;font-size:12.5px;border-radius:8px;flex:none">⚡ 双边下单</button>
+        <button class="btn-close" id="drawerClose">✕</button>
+      </div>
+    </div>
+    <!-- Stats strip -->
+    <div class="drawer-stats-grid" id="drawerStats"></div>
+  </div>
+
+  <!-- Body -->
+  <div class="drawer-body">
+
+    <!-- 历史资金费率 -->
+    <div class="detail-section">
+      <div class="section-header">
+        <div class="section-title">
+          <div class="section-title-icon icon-funding">📈</div>
+          历史资金费率 <span style="color:var(--text-muted);font-weight:500;font-size:11px">近 7 天</span>
+        </div>
+        <div class="chart-legend" id="frLegend"></div>
+        <div class="chart-loading-row hidden" id="frLoading">
+          <div class="mini-spinner"></div> 加载中…
+        </div>
+      </div>
+      <div class="pills-row" id="frStability"></div>
+      <div class="chart-canvas-wrap">
+        <canvas id="frChart" height="160"></canvas>
+      </div>
+      <div class="chart-xaxis" id="frXAxis"></div>
+    </div>
+
+      <!-- 7天历史盈亏 -->
+      <div class="detail-section">
+        <div class="section-header">
+          <div class="section-title">
+            <div class="section-title-icon" style="background:rgba(5,150,105,.12)">💰</div>
+            7天历史净盈亏 <span style="color:var(--text-muted);font-weight:500;font-size:11px">按实际资金费结算 · 扣除手续费</span>
+          </div>
+        </div>
+        <div class="section-body">
+          <div id="hist7dPnl"><span style="color:var(--text-muted);font-size:12px">打开套利对后加载…</span></div>
+        </div>
+      </div>
+
+      <!-- 历史价差 -->
+      <div class="detail-section">
+      <div class="section-header">
+        <div class="section-title">
+          <div class="section-title-icon icon-spread">📊</div>
+          历史价差走势 <span style="color:var(--text-muted);font-weight:500;font-size:11px">近 7 天</span>
+        </div>
+        <div class="chart-loading-row hidden" id="spreadLoading">
+          <div class="mini-spinner"></div> 加载中…
+        </div>
+      </div>
+      <div class="pills-row" id="spreadStability"></div>
+      <div class="chart-canvas-wrap">
+        <canvas id="spreadChart" height="160"></canvas>
+      </div>
+      <div class="chart-xaxis" id="spreadXAxis"></div>
+      <div class="safe-range-banner" id="safeRangeBanner"></div>
+      <div style="height:16px"></div>
+    </div>
+
+    <!-- 下单面板 -->
+    <div class="detail-section">
+      <div class="section-header">
+        <div class="section-title">
+          <div class="section-title-icon icon-order">⚡</div>
+          下单设置
+        </div>
+      </div>
+      <div class="section-body">
+
+        <div class="order-grid">
+          <!-- Long leg -->
+          <div class="order-leg long-leg">
+            <div class="leg-header">
+              <span class="leg-badge long">做多</span>
+              <span class="leg-ex" id="longExInfo"></span>
+            </div>
+            <div class="form-field">
+              <span class="field-label">价格</span>
+              <div class="input-row">
+                <input type="number" id="longPrice" class="field-input" placeholder="市价">
+                <button class="btn-mkt" data-side="long">市价</button>
+              </div>
+            </div>
+            <div class="form-field">
+              <span class="field-label">数量（合约）</span>
+              <input type="number" id="longSize" class="field-input" placeholder="0.0000" step="0.01">
+            </div>
+            <div class="form-field">
+              <span class="field-label">杠杆</span>
+              <div class="lev-btns" id="longLeverageBtns">
+                <button class="lev-btn" data-lev="1">1×</button>
+                <button class="lev-btn active" data-lev="3">3×</button>
+                <button class="lev-btn" data-lev="5">5×</button>
+                <button class="lev-btn" data-lev="10">10×</button>
+              </div>
+            </div>
+            <div class="est-margin" id="longCost">保证金 --</div>
+          </div>
+
+          <!-- Divider -->
+          <div class="order-divider">
+            <div class="divider-icon">⇄</div>
+            <div class="notional-wrap">
+              <span class="field-label">名义 USDT</span>
+              <input type="number" id="notionalInput" class="notional-input" placeholder="1000" value="1000">
+            </div>
+          </div>
+
+          <!-- Short leg -->
+          <div class="order-leg short-leg">
+            <div class="leg-header">
+              <span class="leg-badge short">做空</span>
+              <span class="leg-ex" id="shortExInfo"></span>
+            </div>
+            <div class="form-field">
+              <span class="field-label">价格</span>
+              <div class="input-row">
+                <input type="number" id="shortPrice" class="field-input" placeholder="市价">
+                <button class="btn-mkt" data-side="short">市价</button>
+              </div>
+            </div>
+            <div class="form-field">
+              <span class="field-label">数量（合约）</span>
+              <input type="number" id="shortSize" class="field-input" placeholder="0.0000" step="0.01">
+            </div>
+            <div class="form-field">
+              <span class="field-label">杠杆</span>
+              <div class="lev-btns" id="shortLeverageBtns">
+                <button class="lev-btn" data-lev="1">1×</button>
+                <button class="lev-btn active" data-lev="3">3×</button>
+                <button class="lev-btn" data-lev="5">5×</button>
+                <button class="lev-btn" data-lev="10">10×</button>
+              </div>
+            </div>
+            <div class="est-margin" id="shortCost">保证金 --</div>
+          </div>
+        </div>
+
+        <!-- P&L -->
+        <div class="pnl-card">
+          <div class="pnl-card-title">收益预估</div>
+          <div class="pnl-grid" id="pnlGrid"></div>
+        </div>
+
+        <!-- Buttons -->
+        <div class="order-action-row">
+          <button class="btn-action btn-long" id="btnLong">
+            <span id="longExLabel"></span> 做多
+          </button>
+          <button class="btn-action btn-short" id="btnShort">
+            <span id="shortExLabel"></span> 做空
+          </button>
+          <button class="btn-action btn-both" id="btnBoth">⚡ 双边下单</button>
+        </div>
+
+        <div class="api-warn" id="apiWarning"></div>
+      </div>
+    </div>
+
+  </div><!-- /drawer-body -->
+</div><!-- /detail-drawer -->
+
+<!-- ═══════════════════════════ SETTINGS MODAL ═══════════════════════════ -->
+<div class="modal-overlay" id="settingsModal" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">API 密钥配置</span>
+      <button class="modal-close" id="settingsClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="ex-tabs" id="exTabs">
+        <button class="ex-tab active" data-stab="hl">Hyperliquid</button>
+        <button class="ex-tab" data-stab="aster">AsterDEX</button>
+        <button class="ex-tab" data-stab="binance">Binance</button>
+        <button class="ex-tab" data-stab="okx">OKX</button>
+        <button class="ex-tab" data-stab="bybit">Bybit</button>
+        <button class="ex-tab" data-stab="gate">Gate</button>
+      </div>
+      <div id="settingsContent"></div>
+      <div class="security-note">
+        <strong>⚠ 安全提示：</strong>密钥仅保存在本地 localStorage，不会上传任何服务器。
+        建议只开启「交易」权限，务必禁用「提款」权限。
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" id="settingsCancelBtn">关闭</button>
+      <button class="btn-primary" id="settingsSaveBtn">保存配置</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ TOAST ═══════════════════════════ -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="app.js?v=5"></script>
+</body>
+</html>
