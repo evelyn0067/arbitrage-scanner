@@ -1643,9 +1643,23 @@ function analyzeNegFunding(perSettlement) {
  * @param {object} depthShort - fetchOrderbookDepth(shortEx) 结果，可为 null
  * @returns {{ score, grade, reasons, eligible }}
  */
+// 滑点估算（公共）：基于 ±0.5% 挂单深度，开+平 × 双腿。深度未就绪返回 null。
+function estimateSlippageUSD(dL, dS, notional) {
+  const leg = (depth) => {
+    if (!depth || !depth.totalDepth) return null;
+    const side = depth.totalDepth / 2;                 // 单侧可用深度(USDT)
+    const fill = notional / Math.max(side, 1);
+    return Math.min(1, fill) * 0.005 / 2 + (fill > 1 ? (fill - 1) * 0.005 : 0);
+  };
+  const a = leg(dL), b = leg(dS);
+  if (a === null || b === null) return null;
+  return (a + b) * 2 * notional;
+}
+
 function scoreOpp(opp, frA = [], frB = [], depthLong = null, depthShort = null) {
   let score = 0;
   const reasons = [];
+  let realizedGross = null;    // 7天真实实现资金费(每$1比例)，用于净收益闸门
 
   // ── 1. 当前APR (0-35分) ──
   const aprScore = Math.min(35, (opp.apr / 100) * 35);
@@ -1669,6 +1683,7 @@ function scoreOpp(opp, frA = [], frB = [], depthLong = null, depthShort = null) 
     });
 
     if (series.length) {
+      realizedGross = series.reduce((s, d) => s + d.earned, 0);   // 累计实现费率(比例)
       const winRate = series.filter(d => d.earned >= 0).length / series.length;
       score += winRate * 25;
 
@@ -1728,6 +1743,19 @@ function scoreOpp(opp, frA = [], frB = [], depthLong = null, depthShort = null) 
   else if (score >= 50) { grade = 'B'; eligible = true;  }
   else if (score >= 35) { grade = 'C'; eligible = false; }
   else                  { grade = 'D'; eligible = false; }
+
+  // ── 净收益硬闸门：扣手续费+滑点后资金费净收为负 → 直接不建议开仓（无论当前年化多高）──
+  const _notional = parseFloat(document.getElementById('notionalInput')?.value || 1000);
+  const _slip = estimateSlippageUSD(depthLong, depthShort, _notional);
+  if (realizedGross !== null && _slip !== null) {
+    const _fee = calcRoundTripFee(opp.longEx, opp.shortEx) * _notional;
+    const _carry = realizedGross * _notional - _fee - _slip;   // 资金费 − 手续费 − 滑点
+    if (_carry <= 0) {
+      grade = 'D'; eligible = false;
+      score = Math.min(score, 34);
+      reasons.unshift(`❌ 扣手续费+滑点后净亏约 $${_carry.toFixed(2)}（$${_notional} 本金），当前高年化不足以覆盖成本`);
+    }
+  }
 
   return { score: Math.round(score), grade, reasons, eligible };
 }
@@ -1794,16 +1822,9 @@ function renderHist7dPnl(frA, frB, opp, depthLong = null, depthShort = null) {
   // ── 滑点估算（基于 ±0.5% 挂单深度；开+平 = 每腿 2 次吃单）──
   const dL = depthLong  ?? state.histDepthLong;
   const dS = depthShort ?? state.histDepthShort;
-  const slipLeg = (depth) => {
-    if (!depth || !depth.totalDepth) return null;
-    const side = depth.totalDepth / 2;                 // 单侧可用深度(USDT)
-    const fill = notional / Math.max(side, 1);         // 需吃掉的比例
-    // 线性订单簿假设：填满比例 f 的 0.5% band → 均价冲击 ≈ 0.5%×f/2；超出 band 部分按 0.5% 线性惩罚
-    return Math.min(1, fill) * 0.005 / 2 + (fill > 1 ? (fill - 1) * 0.005 : 0);
-  };
-  const slL = slipLeg(dL), slS = slipLeg(dS);
-  const slipReady = slL !== null && slS !== null;
-  const slippageUSD = slipReady ? (slL + slS) * 2 * notional : 0;
+  const _slipUSD = estimateSlippageUSD(dL, dS, notional);   // 公共口径（与评分闸门一致）
+  const slipReady = _slipUSD !== null;
+  const slippageUSD = slipReady ? _slipUSD : 0;
   const depthShort_notEnough = slipReady &&
     (notional / ((dL.totalDepth / 2) || 1) > 1 || notional / ((dS.totalDepth / 2) || 1) > 1);
 
