@@ -3454,36 +3454,7 @@ window.startAutoArbi = startAutoArbi;
 window.stopAutoArbi  = stopAutoArbi;
 window.autoClose     = autoClose;
 
-// ============================================================
-// THEME SWITCHER
-// ============================================================
-const THEMES = ['light', 'contrast', 'paper', 'terminal', 'midnight', 'pop', 'candy', 'synthwave', 'arcade'];
-function applyTheme(name) {
-  const t = THEMES.includes(name) ? name : 'light';
-  if (t === 'light') document.documentElement.removeAttribute('data-theme');
-  else document.documentElement.setAttribute('data-theme', t);
-  try { localStorage.setItem('arbi_theme', t); } catch (e) {}
-  document.querySelectorAll('.theme-opt').forEach(b =>
-    b.classList.toggle('active', b.dataset.theme === t));
-}
-function initTheme() {
-  let saved = 'light';
-  try { saved = localStorage.getItem('arbi_theme') || 'light'; } catch (e) {}
-  applyTheme(saved);
-  const btn = document.getElementById('themeBtn');
-  const menu = document.getElementById('themeMenu');
-  if (btn && menu) {
-    btn.addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
-    menu.querySelectorAll('.theme-opt').forEach(opt =>
-      opt.addEventListener('click', () => { applyTheme(opt.dataset.theme); menu.hidden = true; }));
-    document.addEventListener('click', (e) => {
-      if (!document.getElementById('themeSwitch')?.contains(e.target)) menu.hidden = true;
-    });
-  }
-}
-
 document.addEventListener('DOMContentLoaded', () => {
-  initTheme();         // 换肤（在最前，避免首屏闪烁）
   loadApiKeys();
   loadAutoArbi();
   bindEvents();
