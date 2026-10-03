@@ -980,8 +980,8 @@ function render(opps) {
         <div class="token-cell">
           ${tokenIconHTML(o.symbol)}
           <div>
-            <div class="token-name">${o.symbol}${o.riskThin ? '<span class="risk-chip rc-thin" title="任一腿24h成交额偏低，挂单薄、滑点大">薄盘</span>' : ''}${o.riskWide ? '<span class="risk-chip rc-wide" title="两所价差偏大，可能非同一资产或流动性差">价差大</span>' : ''}</div>
-            <div class="token-sub">PERP · USDT</div>
+            <div class="token-name">${o.symbol}${o.riskThin ? '<span class="risk-chip rc-thin" title="任一腿24h成交额偏低，挂单薄、滑点大">薄盘</span>' : ''}${o.riskWide ? '<span class="risk-chip rc-wide" title="两所价差偏大，可能非同一资产或流动性差">价差大</span>' : ''}${o.consistency !== undefined ? `<span class="risk-chip rc-consist" title="过去7天当前多空方向成立的比例；越高越稳">一致${Math.round(o.consistency*100)}%</span>` : ''}</div>
+            <div class="token-sub">${o.consistency !== undefined ? `实现年化 ${o.realizedApr.toFixed(0)}% · 顺向最长${o.favStreak}连 · 翻转${o.flips}次` : 'PERP · USDT'}</div>
           </div>
         </div>
       </td>
@@ -2402,6 +2402,7 @@ function bindEvents() {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       state.tab = btn.dataset.tab;
+      if (curatedMode) { curatedMode = false; document.getElementById('curateBtn')?.classList.remove('active'); }
       state.arbitrages = buildArbitrages(state.markets, state.tab);
       render(filterAndSort(state.arbitrages));
     });
@@ -2436,7 +2437,14 @@ function bindEvents() {
   // Sort
   document.getElementById('sortSelect').addEventListener('change', e => {
     state.sortBy = e.target.value;
+    if (curatedMode) { curatedMode = false; document.getElementById('curateBtn')?.classList.remove('active'); }
     render(filterAndSort(state.arbitrages));
+  });
+
+  // 精选（稳定性筛选）切换
+  document.getElementById('curateBtn').addEventListener('click', () => {
+    if (curatedMode) exitCurated();
+    else runCuratedScreen();
   });
 
   // Refresh
@@ -3203,13 +3211,103 @@ function touchWS(ex) {
 function ensureMkt(ex) { if (!state.markets[ex]) state.markets[ex] = {}; return state.markets[ex]; }
 
 // ---- 渲染循环：脏了才重建套利 + 重绘 ----
+// ============================================================
+// 「精选」稳定性筛选：对候选批量回测 7 天资金费，按方向一致性筛选重排
+// 核心：方向翻转频繁的对，realizedApr(真实实现年化)会被负结算拖低甚至为负，自动沉底/剔除
+// ============================================================
+const CURATE_TOP_N          = 20;     // 粗筛候选数（只对这些拉历史，控制请求量）
+const CURATE_MIN_SETTLE     = 10;     // 至少这么多次结算才有统计意义
+const CURATE_MIN_CONSISTENCY= 0.70;   // 方向一致性阈值（当前多空方向成立的比例）
+let curatedMode = false, curatedBusy = false;
+const _histFundingCache = {};         // `${ex}:${sym}` -> {ts, data}
+
+async function cachedHistFunding(ex, sym) {
+  const k = ex + ':' + sym, now = Date.now();
+  const c = _histFundingCache[k];
+  if (c && now - c.ts < 10 * 60 * 1000) return c.data;
+  const d = await fetchHistoricalFunding(ex, sym);
+  _histFundingCache[k] = { ts: now, data: d };
+  return d;
+}
+
+// 从两腿历史资金费算稳定性指标（当前多空方向下）
+function computeStability(frA, frB) {
+  const BUCKET = 8 * 3600 * 1000, mapB = {};
+  (frB || []).forEach(d => { mapB[Math.round(d.time / BUCKET)] = d; });
+  const nets = [];
+  (frA || []).slice().sort((a, b) => a.time - b.time).forEach(dA => {
+    const k = Math.round(dA.time / BUCKET);
+    const dB = mapB[k] || mapB[k - 1] || mapB[k + 1];
+    if (dB) nets.push(dB.rate - dA.rate);   // 空腿 − 多腿 = 当前方向每次净收
+  });
+  const n = nets.length;
+  if (!n) return null;
+  const pos = nets.filter(x => x > 0).length;
+  let flips = 0;
+  for (let i = 1; i < n; i++) if (nets[i] * nets[i - 1] < 0) flips++;
+  let streak = 0, best = 0;
+  nets.forEach(x => { if (x > 0) { streak++; best = Math.max(best, streak); } else streak = 0; });
+  const avgNet = nets.reduce((s, x) => s + x, 0) / n;
+  return {
+    settlements: n,
+    consistency: pos / n,                      // 方向一致性
+    flips,                                      // 符号翻转次数
+    favStreak: best,                            // 最长顺向连续
+    realizedApr: avgNet * (HOURS_PER_YEAR / 8) * 100,  // 真实实现年化（含翻转拖累）
+  };
+}
+
+async function runCuratedScreen() {
+  if (curatedBusy) return;
+  curatedBusy = true; curatedMode = true;
+  document.getElementById('curateBtn')?.classList.add('active');
+  const cands = filterAndSort(state.arbitrages).slice(0, CURATE_TOP_N);
+  const body = document.getElementById('arbTableBody');
+  const setMsg = (m) => { if (body) body.innerHTML = `<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--text-secondary)">${m}</td></tr>`; };
+  document.getElementById('arbTable').style.display = 'table';
+  document.getElementById('emptyState').style.display = 'none';
+  setMsg(`✨ 精选计算中… 正在回测 ${cands.length} 个候选的 7 天资金费`);
+
+  const out = [], CONC = 4;
+  for (let i = 0; i < cands.length; i += CONC) {
+    await Promise.all(cands.slice(i, i + CONC).map(async o => {
+      try {
+        const [frA, frB] = await Promise.all([
+          cachedHistFunding(o.longEx, o.symbol),
+          cachedHistFunding(o.shortEx, o.symbol),
+        ]);
+        const st = computeStability(frA, frB);
+        if (st) out.push({ ...o, ...st });
+      } catch (e) {}
+    }));
+    setMsg(`✨ 精选计算中… ${Math.min(i + CONC, cands.length)}/${cands.length}`);
+  }
+
+  const passed = out
+    .filter(o => o.settlements >= CURATE_MIN_SETTLE && o.consistency >= CURATE_MIN_CONSISTENCY && o.realizedApr > 0)
+    .sort((a, b) => b.realizedApr - a.realizedApr);
+
+  state.curatedList = passed;
+  curatedBusy = false;
+  if (!passed.length) { setMsg('✨ 没有方向足够稳定的机会（一致性≥' + Math.round(CURATE_MIN_CONSISTENCY*100) + '% 且历史净费率为正）。可降低最低年化或稍后再试。'); }
+  else render(passed);
+}
+
+function exitCurated() {
+  curatedMode = false;
+  document.getElementById('curateBtn')?.classList.remove('active');
+  wsDirty = true;
+  state.arbitrages = buildArbitrages(state.markets, state.tab);
+  render(filterAndSort(state.arbitrages));
+}
+
 function liveRenderLoop() {
   setInterval(() => {
     if (!wsDirty) return;
-    // 抽屉打开时：仍更新底层数据，但不重绘表格（避免行重排打断用户操作）
+    // 抽屉打开 / 精选模式时：仍更新底层数据，但不重绘表格（避免覆盖掉当前视图）
     const drawerOpen = document.getElementById('detailDrawer')?.classList.contains('open');
     state.arbitrages = buildArbitrages(state.markets, state.tab);
-    if (drawerOpen) return;
+    if (drawerOpen || curatedMode) return;
     wsDirty = false;
     render(filterAndSort(state.arbitrages));
     const el = document.getElementById('updateTime');
